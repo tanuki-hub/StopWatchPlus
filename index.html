@@ -1,267 +1,127 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
-  <link rel="icon" href="favicon.ico" type="image/x-icon">
-  <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Precise Stopwatch</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ストップウォッチ</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+    :root {
+      --bg-color: #121212;
+      --text-color: #ffffff;
     }
-
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      font-family: Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      background-color: #121212;
-      color: #ffffff;
-      transition: background-color 0.3s, color 0.3s;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-
-    .stopwatch-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      width: 100%;
-      height: 60%;
-    }
-
-    .stopwatch {
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: sans-serif;
       text-align: center;
-      font-size: 10vw;
+      padding: 2rem;
+      transition: background-color 0.5s, color 0.5s;
     }
-
-    .input-container {
-      margin-top: 20px;
-      text-align: center;
-    }
-
-    .input-container input {
+    input, button {
       font-size: 1.2rem;
-      padding: 6px 10px;
-      width: 150px;
-      text-align: center;
+      margin: 0.5rem;
+      padding: 0.5rem 1rem;
     }
-
-    .input-container button {
-      font-size: 1rem;
-      padding: 6px 10px;
-      margin-left: 10px;
-      cursor: pointer;
-    }
-
     .light-mode {
-      background-color: #ffffff;
-      color: #000000;
+      --bg-color: #ffffff;
+      --text-color: #000000;
+    }
+    #time {
+      font-size: 3rem;
+      margin: 1rem 0;
     }
   </style>
 </head>
 <body>
-  <div class="stopwatch-container">
-    <div class="stopwatch" id="stopwatch">00:00:00.000</div>
-  </div>
+  <h1>ストップウォッチ</h1>
+  <input type="text" id="inputTime" placeholder="例: 5.12 → 5分12秒">
+  <div id="time">00:00</div>
+  <button id="startStop">スタート</button>
+  <button id="reset">リセット</button>
 
-  <!-- 入力欄とボタン -->
-  <div class="input-container">
-    <input type="text" id="timeInput" placeholder="mm.ss">
-    <button onclick="startFromInput()">Start from Input</button>
-  </div>
-
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
   <script>
-    const stopwatch = document.getElementById("stopwatch");
-    const timeInput = document.getElementById("timeInput");
+    let startTimestamp = null;
+    let pausedTimestamp = null;
+    let baseOffset = 0; // 入力から始める秒数（ミリ秒）
+    let timer = null;
+    let running = false;
+    const input = document.getElementById('inputTime');
+    const timeDisplay = document.getElementById('time');
+    const startStopBtn = document.getElementById('startStop');
+    const resetBtn = document.getElementById('reset');
+    const body = document.body;
+    const noSleep = new NoSleep();
 
-    let startTime = null;
-    let elapsedMilliseconds = 0;
-    let isRunning = false;
-    let animationFrameId = null;
-    let wakeLock = null;
-    let lastTenMinuteStep = -1;
-
-    function loadState() {
-      const savedElapsed = localStorage.getItem("elapsedMilliseconds");
-      const savedRunning = localStorage.getItem("isRunning");
-
-      if (savedElapsed) elapsedMilliseconds = parseInt(savedElapsed, 10);
-      if (savedRunning === "true") {
-        isRunning = true;
-        startTime = performance.now() - elapsedMilliseconds;
-        updateTimer();
-        requestWakeLock();
-      }
-      updateStopwatchDisplay();
+    function formatTime(ms) {
+      let totalSeconds = Math.floor(ms / 1000);
+      let minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+      let seconds = String(totalSeconds % 60).padStart(2, '0');
+      return `${minutes}:${seconds}`;
     }
 
-    function saveState() {
-      localStorage.setItem("elapsedMilliseconds", elapsedMilliseconds);
-      localStorage.setItem("isRunning", isRunning);
-    }
+    function updateDisplay() {
+      if (!startTimestamp) return;
+      const now = Date.now();
+      const diff = now - startTimestamp + baseOffset;
+      timeDisplay.textContent = formatTime(diff);
 
-    function clearState() {
-      localStorage.removeItem("elapsedMilliseconds");
-      localStorage.removeItem("isRunning");
-    }
-
-    async function requestWakeLock() {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await navigator.wakeLock.request('screen');
-        }
-      } catch (err) {
-        console.error('Wake Lock failed:', err);
+      if (diff >= 600000 && !body.classList.contains('light-mode')) {
+        body.classList.add('light-mode');
       }
     }
 
-    function releaseWakeLock() {
-      if (wakeLock !== null) {
-        wakeLock.release()
-          .then(() => wakeLock = null)
-          .catch(err => console.error('Wake Lock release failed:', err));
-      }
-    }
-
-    function updateStopwatchDisplay() {
-      const totalSeconds = Math.floor(elapsedMilliseconds / 1000);
-      const milliseconds = Math.floor(elapsedMilliseconds % 1000);
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
-
-      stopwatch.textContent = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
-
-      if (isRunning) {
-        const tenMinuteStep = Math.floor(totalSeconds / 600);
-        if (tenMinuteStep > lastTenMinuteStep) {
-          lastTenMinuteStep = tenMinuteStep;
-          document.body.classList.add("light-mode");
-        }
-      }
-    }
-
-    function updateTimer() {
-      if (isRunning) {
-        const now = performance.now();
-        elapsedMilliseconds = now - startTime;
-        updateStopwatchDisplay();
-        animationFrameId = requestAnimationFrame(updateTimer);
-      }
-    }
-
-    async function toggleTimer() {
-      if (isRunning) {
-        if (document.body.classList.contains("light-mode")) {
-          document.body.classList.remove("light-mode");
-        }
-
-        cancelAnimationFrame(animationFrameId);
-        isRunning = false;
-        saveState();
-        releaseWakeLock();
-      } else {
-        lastTenMinuteStep = Math.floor(elapsedMilliseconds / 600000);
-        startTime = performance.now() - elapsedMilliseconds;
-        isRunning = true;
-        await requestWakeLock();
-        updateTimer();
-      }
-    }
-
-    function resetTimer() {
-      cancelAnimationFrame(animationFrameId);
-      elapsedMilliseconds = 0;
-      startTime = null;
-      isRunning = false;
-      clearState();
-      releaseWakeLock();
-      document.body.classList.remove("light-mode");
-      lastTenMinuteStep = -1;
-      updateStopwatchDisplay();
-    }
-
-    function parseInputTime(input) {
-      const parts = input.split(".");
-      if (parts.length !== 2) return null;
-
-      const minutes = parseInt(parts[0], 10);
-      const seconds = parseInt(parts[1], 10);
-
-      if (isNaN(minutes) || isNaN(seconds) || seconds >= 60) return null;
-
+    function parseInputTime() {
+      const val = input.value.trim();
+      const parts = val.split('.');
+      let minutes = parseInt(parts[0] || '0');
+      let seconds = parseInt((parts[1] || '0').padEnd(2, '0'));
       return (minutes * 60 + seconds) * 1000;
     }
 
-    async function startFromInput() {
-      const ms = parseInputTime(timeInput.value.trim());
-      if (ms === null) {
-        alert("Please enter time in mm.ss format (e.g., 6.24)");
-        return;
+    function startStopwatch(fromInput = false) {
+      if (fromInput) {
+        baseOffset = parseInputTime();
       }
-
-      cancelAnimationFrame(animationFrameId);
-      elapsedMilliseconds = ms;
-      startTime = performance.now() - ms;
-      isRunning = true;
-      lastTenMinuteStep = Math.floor(elapsedMilliseconds / 600000);
-      await requestWakeLock();
-      updateTimer();
+      startTimestamp = Date.now();
+      timer = setInterval(updateDisplay, 100);
+      running = true;
+      noSleep.enable();
+      startStopBtn.textContent = 'ストップ';
     }
 
-    let startX = 0;
-    let isSwipe = false;
-
-    function startSwipe(event) {
-      isSwipe = false;
-      if (event.type === "touchstart") {
-        startX = event.touches[0].clientX;
-      } else if (event.type === "mousedown") {
-        startX = event.clientX;
-      }
+    function stopStopwatch() {
+      clearInterval(timer);
+      const now = Date.now();
+      baseOffset += now - startTimestamp;
+      startTimestamp = null;
+      running = false;
+      noSleep.disable();
+      startStopBtn.textContent = 'スタート';
     }
 
-    function endSwipe(event) {
-      let endX = 0;
-
-      if (event.type === "touchend") {
-        endX = event.changedTouches[0].clientX;
-      } else if (event.type === "mouseup") {
-        endX = event.clientX;
-      }
-
-      const diffX = endX - startX;
-
-      if (Math.abs(diffX) > 50) {
-        isSwipe = true;
-        resetTimer();
-        console.log("Timer reset via swipe");
-      }
+    function resetStopwatch() {
+      clearInterval(timer);
+      baseOffset = 0;
+      startTimestamp = null;
+      running = false;
+      timeDisplay.textContent = '00:00';
+      body.classList.remove('light-mode');
+      noSleep.disable();
+      startStopBtn.textContent = 'スタート';
     }
 
-    document.body.addEventListener("click", (event) => {
-      if (!isSwipe) {
-        toggleTimer();
+    startStopBtn.addEventListener('click', () => {
+      if (running) {
+        stopStopwatch();
+      } else {
+        startStopwatch(!baseOffset);
       }
     });
 
-    document.body.addEventListener("touchstart", startSwipe);
-    document.body.addEventListener("touchend", endSwipe);
-    document.body.addEventListener("mousedown", startSwipe);
-    document.body.addEventListener("mouseup", endSwipe);
+    resetBtn.addEventListener('click', resetStopwatch);
 
-    window.addEventListener("load", loadState);
-    window.addEventListener("beforeunload", saveState);
-
-    updateStopwatchDisplay();
+    updateDisplay();
   </script>
 </body>
 </html>
