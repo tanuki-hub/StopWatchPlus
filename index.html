@@ -42,10 +42,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
   <script>
     let startTimestamp = null;
-    let pausedTimestamp = null;
-    let baseOffset = 0; // 入力から始める秒数（ミリ秒）
+    let baseOffset = 0;
     let timer = null;
     let running = false;
+
     const input = document.getElementById('inputTime');
     const timeDisplay = document.getElementById('time');
     const startStopBtn = document.getElementById('startStop');
@@ -61,7 +61,10 @@
     }
 
     function updateDisplay() {
-      if (!startTimestamp) return;
+      if (!startTimestamp) {
+        timeDisplay.textContent = formatTime(baseOffset);
+        return;
+      }
       const now = Date.now();
       const diff = now - startTimestamp + baseOffset;
       timeDisplay.textContent = formatTime(diff);
@@ -79,49 +82,81 @@
       return (minutes * 60 + seconds) * 1000;
     }
 
-    function startStopwatch(fromInput = false) {
+    function saveState() {
+      localStorage.setItem('stopwatch_state', JSON.stringify({
+        startTimestamp,
+        baseOffset,
+        running,
+        lightMode: body.classList.contains('light-mode')
+      }));
+    }
+
+    function loadState() {
+      const state = localStorage.getItem('stopwatch_state');
+      if (!state) return;
+      const parsed = JSON.parse(state);
+      startTimestamp = parsed.startTimestamp;
+      baseOffset = parsed.baseOffset || 0;
+      running = parsed.running;
+      if (parsed.lightMode) body.classList.add('light-mode');
+      if (running && startTimestamp) {
+        startTimer();
+      } else {
+        updateDisplay();
+      }
+    }
+
+    function startTimer(fromInput = false) {
       if (fromInput) {
         baseOffset = parseInputTime();
       }
-      startTimestamp = Date.now();
+      if (!startTimestamp) {
+        startTimestamp = Date.now();
+      }
+      clearInterval(timer);
       timer = setInterval(updateDisplay, 100);
       running = true;
       noSleep.enable();
       startStopBtn.textContent = 'ストップ';
+      saveState();
     }
 
-    function stopStopwatch() {
-      clearInterval(timer);
+    function stopTimer() {
       const now = Date.now();
       baseOffset += now - startTimestamp;
       startTimestamp = null;
+      clearInterval(timer);
       running = false;
       noSleep.disable();
       startStopBtn.textContent = 'スタート';
+      saveState();
+      updateDisplay();
     }
 
-    function resetStopwatch() {
+    function resetTimer() {
       clearInterval(timer);
-      baseOffset = 0;
       startTimestamp = null;
+      baseOffset = 0;
       running = false;
-      timeDisplay.textContent = '00:00';
       body.classList.remove('light-mode');
       noSleep.disable();
       startStopBtn.textContent = 'スタート';
+      timeDisplay.textContent = '00:00';
+      localStorage.removeItem('stopwatch_state');
     }
 
     startStopBtn.addEventListener('click', () => {
       if (running) {
-        stopStopwatch();
+        stopTimer();
       } else {
-        startStopwatch(!baseOffset);
+        startTimer(!baseOffset);
       }
     });
 
-    resetBtn.addEventListener('click', resetStopwatch);
+    resetBtn.addEventListener('click', resetTimer);
 
-    updateDisplay();
+    // ページ読み込み時に状態復元
+    loadState();
   </script>
 </body>
 </html>
